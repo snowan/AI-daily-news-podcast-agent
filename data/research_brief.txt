@@ -1,0 +1,3 @@
+Research Brief for Topic: Anthropic CEO claims AI models hallucinate less than humans
+
+LLM summary would be here. The full text processed would have been logged before this placeholder.
