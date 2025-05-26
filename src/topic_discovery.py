@@ -9,14 +9,17 @@ NEWS_SOURCES = [
     {"url": "https://techcrunch.com/category/artificial-intelligence/", "extractor": "extract_articles_techcrunch_playwright", "source_name": "TechCrunch"},
     {"url": "https://www.theverge.com/ai-artificial-intelligence", "extractor": "extract_articles_theverge_bs", "source_name": "The Verge"},
     {"url": "https://www.technologyreview.com/artificial-intelligence", "extractor": "extract_articles_technologyreview_bs", "source_name": "MIT Technology Review"},
+    {"url": "https://www.axios.com/sections/artificial-intelligence", "extractor": "extract_articles_axios_bs", "source_name": "Axios AI"},
+    {"url": "https://venturebeat.com/category/ai/", "extractor": "extract_articles_venturebeat_bs", "source_name": "VentureBeat AI"},
 ]
 
 # Define AI-related keywords for filtering
 AI_KEYWORDS = [
-    "AI", "Artificial Intelligence", "Machine Learning", "Language Model", "AGI",
-    "GPT", "LLM", "OpenAI", "DeepMind", "Anthropic", "Claude", "Gemini", "Sora", "Llama",
+    "AI", "Artificial Intelligence", "Machine Learning", "Language Model", "AGI", "ASI", "Superintelligence",
+    "GPT", "LLM", "OpenAI", "DeepMind", "Anthropic", "Claude", "Gemini", "Sora", "Llama", "Mistral", "Reka",
     "neural network", "robotics", "computer vision", "NLP", "natural language processing",
-    "generative AI", "AI model", "AI ethics", "AI regulation", "AI safety"
+    "generative AI", "GenAI", "AI model", "AI ethics", "AI regulation", "AI safety", "Responsible AI",
+    "multimodal AI", "AI agent", "foundation model", "AI chip", "TPU", "GPU"
 ]
 
 
@@ -102,13 +105,14 @@ async def extract_articles_techcrunch_playwright(resource_tuple: tuple, base_url
         # Broad heuristic: Find all <a> tags whose href matches common TechCrunch article URL pattern
         # e.g., https://techcrunch.com/YYYY/MM/DD/slug/
         # This is a very general approach.
-        all_links = await page.locator(f'a[href^="{base_url}/20"]').all() # Looking for links starting with base_url + /20 (for year)
+        # The .all() method is not async, it returns a list of locators.
+        link_locators = page.locator(f'a[href^="{base_url}/20"]').all() 
         
-        print(f"TechCrunch (Playwright Extractor): Found {len(all_links)} potential article links matching pattern '{base_url}/20'.")
+        print(f"TechCrunch (Playwright Extractor): Found {len(link_locators)} potential article links matching pattern '{base_url}/20'.")
 
-        for link_locator in all_links:
-            url = await link_locator.get_attribute('href')
-            headline = await link_locator.inner_text()
+        for link_locator in link_locators: # Iterate directly over the list of locators
+            url = await link_locator.get_attribute('href') # get_attribute is async
+            headline = await link_locator.inner_text() # inner_text is async
             headline = headline.strip() if headline else ""
             
             # Further filter by URL structure and headline content
@@ -178,6 +182,82 @@ def extract_articles_technologyreview_bs(html_content: str, base_url="https://ww
     if not articles: print("MIT Tech Review: No articles found with primary selectors.")
     return list({article['url']: article for article in articles}.values())
 
+
+def extract_articles_axios_bs(html_content: str, base_url="https://www.axios.com") -> list:
+    articles = []
+    if not html_content: return articles
+    soup = BeautifulSoup(html_content, 'html.parser')
+    # Axios has a relatively clean structure, articles are often within <article> tags or specific divs
+    # Look for elements with data-cy="story-card" or similar attributes
+    for item in soup.select('article, div[data-cy="story-card"], div[class*="story-card"]'):
+        headline = None
+        url = None
+        link_tag = item.select_one('a[href]')
+        
+        if link_tag:
+            url = link_tag.get('href')
+            if not url.startswith('http'):
+                url = base_url + url if url.startswith('/') else base_url + '/' + url
+            
+            # Try to find headline within the link or a prominent heading tag
+            headline_el = item.select_one('h3, h2, div[class*="title"]')
+            if headline_el:
+                headline = headline_el.get_text(strip=True)
+            elif link_tag.get_text(strip=True): # Fallback to link text
+                headline = link_tag.get_text(strip=True)
+            elif link_tag.has_attr('title'): # Fallback to link title attribute
+                headline = link_tag['title']
+
+        if headline and url and len(headline) > 10: # Basic validation
+            articles.append({'headline': headline, 'url': url, 'source': 'Axios AI'})
+        # else:
+            # if not headline: print(f"Axios: Skipping item, no headline found. URL: {url}")
+            # if not url: print(f"Axios: Skipping item, no URL found. Headline: {headline}")
+            # if headline and len(headline) <=10: print(f"Axios: Skipping item, headline too short. Headline: {headline}")
+
+    if not articles: print("Axios AI: No articles found with primary selectors.")
+    return list({article['url']: article for article in articles}.values())
+
+
+def extract_articles_venturebeat_bs(html_content: str, base_url="https://venturebeat.com") -> list:
+    articles = []
+    if not html_content: return articles
+    soup = BeautifulSoup(html_content, 'html.parser')
+    # VentureBeat articles are typically in <article> elements or list items
+    for item in soup.select('article.Article, div.ArticleListing, li.wp-block-post'):
+        headline = None
+        url = None
+        
+        link_tag = item.select_one('a[href]')
+        headline_el = item.select_one('h2.Article__title, h3.Article__title, a.Article__title, .wp-block-post-title a')
+
+        if headline_el:
+            headline = headline_el.get_text(strip=True)
+            if headline_el.name == 'a' and headline_el.has_attr('href'):
+                url = headline_el.get('href')
+            elif link_tag and not url: # if headline_el was not 'a' but we found a link_tag earlier
+                 url = link_tag.get('href')
+
+        if not url and link_tag: # If headline was found but URL is still missing, use the general link_tag
+            url = link_tag.get('href')
+            if not headline and link_tag.get_text(strip=True): # If headline is still missing, use link text
+                headline = link_tag.get_text(strip=True)
+        
+        if headline and url and len(headline) > 10:
+            # VentureBeat URLs are usually absolute
+            if not url.startswith('http'):
+                 url = base_url + url if url.startswith('/') else base_url + '/' + url
+            articles.append({'headline': headline, 'url': url, 'source': 'VentureBeat AI'})
+        # else:
+            # if not headline: print(f"VB: Skipping item, no headline. URL: {url}")
+            # if not url: print(f"VB: Skipping item, no URL. Headline: {headline}")
+            # if headline and len(headline) <=10: print(f"VB: Skipping item, headline too short. Headline: {headline}")
+
+
+    if not articles: print("VentureBeat AI: No articles found with primary selectors.")
+    return list({article['url']: article for article in articles}.values())
+
+
 def filter_articles_by_keywords(articles: list, keywords: list) -> list:
     filtered_articles = []
     for article in articles:
@@ -234,15 +314,15 @@ async def main():
         await asyncio.sleep(0.5)
 
     if not all_extracted_articles:
-        print("\nNo articles were extracted from any source using Playwright.")
-        return
+        print("\nNo articles were extracted from any source.")
+        return [] # Return empty list
 
     print(f"\nTotal potential articles extracted (before keyword filtering): {len(all_extracted_articles)}")
     filtered_ai_articles = filter_articles_by_keywords(all_extracted_articles, AI_KEYWORDS)
     
     if filtered_ai_articles:
         print(f"\n=== Found {len(filtered_ai_articles)} AI-Related News Articles (after keyword filtering) ===")
-        filtered_ai_articles.sort(key=lambda x: x['source'])
+        filtered_ai_articles.sort(key=lambda x: x['source']) # Sort for consistent output
         for article in filtered_ai_articles:
             print(f"Headline: {article['headline']}")
             print(f"URL: {article['url']}")
@@ -250,6 +330,14 @@ async def main():
             print("---")
     else:
         print("\nNo AI-related articles found matching keywords from the extracted content.")
+    
+    return filtered_ai_articles
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # To run the main function and see output:
+    # articles = asyncio.run(main())
+    # if articles:
+    #     print(f"\nMain function returned {len(articles)} filtered articles.")
+    # else:
+    #     print("\nMain function returned no articles.")
+    pass # Keep the main execution block clean for module usage
